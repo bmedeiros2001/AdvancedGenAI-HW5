@@ -23,14 +23,14 @@ def test_agent_initialization():
     router.register_specialist(data_agent)
     router.register_specialist(support_agent)
     
-    print(f"\n✓ {router.name} initialized")
+    print(f"\n[+] {router.name} initialized")
     print(f"  Capabilities: {router.capabilities}")
     
-    print(f"\n✓ {data_agent.name} initialized")
+    print(f"\n[+] {data_agent.name} initialized")
     print(f"  Capabilities: {data_agent.capabilities}")
     print(f"  MCP Tools: {data_agent.mcp_tools}")
     
-    print(f"\n✓ {support_agent.name} initialized")
+    print(f"\n[+] {support_agent.name} initialized")
     print(f"  Capabilities: {support_agent.capabilities}")
     print(f"  MCP Tools: {support_agent.mcp_tools}")
     
@@ -79,7 +79,9 @@ def test_routing(router):
 
 def main():
     """Run all tests."""
-    print("\n🚀 Testing Part 1: System Architecture\n")
+    print("\n" + "="*60)
+    print("Testing Part 1: System Architecture")
+    print("="*60 + "\n")
     
     # Test 1: Initialization
     router, data_agent, support_agent = test_agent_initialization()
@@ -91,7 +93,7 @@ def main():
     test_routing(router)
     
     print("\n" + "=" * 60)
-    print("✅ Part 1 Tests Complete!")
+    print("Part 1 Tests Complete!")
     print("=" * 60)
     print("\nNext Steps:")
     print("1. Review the agent interaction logs above")
