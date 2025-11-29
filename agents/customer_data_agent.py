@@ -64,17 +64,15 @@ class CustomerDataAgent(BaseAgent):
     def process(self, query: str, context: Optional[Dict] = None) -> Dict[str, Any]:
         """
         Process customer data requests.
-        
-        Args:
-            query: Query about customer data
-            context: Optional context from Router
-            
-        Returns:
-            Response with customer data or status
         """
         self.log_interaction("processing_query", {"query": query})
         
         query_lower = query.lower()
+
+        # initialize MCP client
+        if not self.mcp_client:
+            from mcp.mcp_client import MCPClient
+            self.mcp_client = MCPClient()
         
         # Determine the operation type
         if "get" in query_lower or "show" in query_lower or "find" in query_lower:
@@ -86,38 +84,89 @@ class CustomerDataAgent(BaseAgent):
         else:
             operation = "retrieve"  # Default
         
-        # For now, return a placeholder response
-        # In Part 2, we'll actually call MCP tools here
+        # RETRIEVE operation
         if operation == "retrieve":
             customer_id = self.extract_customer_id(query)
             if customer_id:
-                return {
+
+                result = self.mcp_client.get_customer(int(customer_id))
+
+                if result['success']:
+                    customer = result['customer']
+                    return {
                     "success": True,
                     "operation": "retrieve",
-                    "content": f"[PLACEHOLDER] Would fetch customer {customer_id} via MCP get_customer()",
-                    "note": "MCP integration coming in Part 2"
+                    "customer": customer,
+                    "content": f"Customer {customer['id']}: {customer['name']} ({customer['status']})"
                 }
+                
             else:
                 return {
                     "success": False,
                     "content": "Please provide a customer ID"
                 }
         
+        # LIST operation
         elif operation == "list":
-            return {
-                "success": True,
-                "operation": "list",
-                "content": "[PLACEHOLDER] Would list customers via MCP list_customers()",
-                "note": "MCP integration coming in Part 2"
-            }
-        
+
+            # extract status if mentioned
+            status = 'active' if 'active' in query_lower else None
+
+            # mcp call
+            result = self.mcp_client.list_customers(status=status, limit=10)
+
+            if result['success']:
+                customers = result['customers']
+                customer_list = "\n".join([
+                    f"  - Customer {c['id']}: {c['name']} ({c['status']})"
+                    for c in customers
+                ])
+                return {
+                    "success": True,
+                    "operation": "list",
+                    "customers": customers,
+                    "content": f"Found {result['count']} customers:\n{customer_list}"
+                }
+            else:
+                return {
+                    "success": False,
+                    "content": "Could not determine operation type"
+                }
+            
+        # UPDATE operation
         elif operation == "update":
-            return {
-                "success": True,
-                "operation": "update",
-                "content": "[PLACEHOLDER] Would update customer via MCP update_customer()",
-                "note": "MCP integration coming in Part 2"
-            }
+            customer_id = self.extract_customer_id(query)
+            if not customer_id:
+                return {
+                    "success": False,
+                    "content": "Please provide a customer ID to update"
+                }
+            
+            # Extract update data from query (simple email extraction for now)
+            import re
+            email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', query)
+            
+            if email_match:
+                new_email = email_match.group(0)
+                # ACTUAL MCP CALL
+                result = self.mcp_client.update_customer(int(customer_id), {'email': new_email})
+                
+                if result['success']:
+                    return {
+                        "success": True,
+                        "operation": "update",
+                        "content": f"Updated customer {customer_id}: {result['updated_fields']}"
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "content": result['error']
+                    }
+            else:
+                return {
+                    "success": False,
+                    "content": "Could not find data to update in query"
+                }
         
         return {
             "success": False,

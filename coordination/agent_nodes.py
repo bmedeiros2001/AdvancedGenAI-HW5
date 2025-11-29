@@ -70,7 +70,7 @@ def create_router_node(router_agent):
         return state
     return router_node
 
-def create_data_agent_node(data_agent, mcp_client=None):
+def create_data_agent_node(agent, CustomerDataAgent):
     """
     Create a graph node for the Customer Data Agent.
     
@@ -79,98 +79,48 @@ def create_data_agent_node(data_agent, mcp_client=None):
     2. Call appropriate MCP tools
     3. Store results in state.customer_data
     4. Route back to router or directly to completion
-    
-    Args:
-        data_agent: Instance of CustomerDataAgent
-        mcp_client: Optional MCP client for making tool calls
-        
-    Returns:
-        Node function that processes state
     """
 
     def data_agent_node(state: AgentState) -> AgentState:
-        """
-        Customer Data Agent node function.
-        
-        Process flow:
-        1. Determine operation (get, list, update)
-        2. Call MCP tools
-        3. Store data in state
-        4. Route to next step
-        """
+        query = state["query"]
+
+        print(f"\n[>] Executing: DATA_AGENT")
         print(f"    -> Processing customer data request...")
-        query = state.query
-        query_lower = query.lower()
 
-        # extract customer ID if present
-        customer_id = data_agent.extract_customer_id(query)
+        # agent.process does MCP calls
+        result = agent.process(query, state.get("context"))
 
-        # determine operation
-        if customer_id:
-            print(f"      Customer ID: {customer_id}")
+        # add customer data to context for other agents
+        new_context = state.get("context", {}).copy()
+        if result.get("success") and "customer" in result:
+            new_context["customer"] = result["customer"]
+            print(f"      Customer ID: {result['customer']['id']}")
+        elif result.get("success") and "customers" in result:
+            print(f"      Operation: LIST customers")
 
-            if mcp_client:
-                # actuall call MCP
-                try:
-                    # call get_customer via MCP
-                    result = mcp_client.call_tool("get_customer", {"customer_id": int(customer_id)})
-                    state.customer_data = result
-                    print(f"       [+] Retrieved customer data via MCP")
+        print("       [!] MCP call completed" if result.get("success") else "       [!] MCP call failed")
 
-                    # check if we also need ticket history
-                    if "ticket" in query_lower or "history" in query_lower:
-                        tickets = mcp_client.call_tool("get_customer_history", {"customer_id":int(customer_id)})
-                        state.tickets_data = tickets
-                        print(f"       [+] Retrieved ticket history via MCP")
-                
-                except Exception as e:
-                    print(f"       [!] MCP call failed: {e}")
-                    state.customer_data = {"error": str(e)}
-
-            else: 
-                # placeholder if no MCP
-                state.customer_data = {
-                    "id": customer_id,
-                    "name": f"Customer {customer_id}",
-                    "status": "active",
-                    "note": "MCP not connected - placeholder data"
-                }
-                print(f"     [!] MCP not connected, using placeholder")
-
-        elif "list" in query_lower or "all" in query_lower:
-            print(f"     Operation: LIST customers")
-
-            if mcp_client:
-                try:
-                    result = mcp_client.call_tool("list_customers", {"status":"active", "limit":10})
-                    state.customer_data = result
-                    print(f"     [+] Listed customers via MCP")
-                except Exception as e:
-                    print(f"     [!] MCP call failed: {e}")
-                    state.customer_data = {"error": str(e)}
-            else:
-                state.customer_data = {
-                    "customers": ["Placeholder customer list"],
-                    "note": "MCP not connected"
-                }
+        # add message to history
+        new_messages = state["messages"].copy()
+        new_messages.append({
+            "from": agent.name,
+            "to": "router",
+            "content": "Retrieved customer data" if result.get("success") else "Failed to retrieve data"
+        })
         
-        # Add message about what we did
-        state.add_message(
-            from_agent="data_agent",
-            to_agent="router",
-            content=f"Retrieved customer data",
-            data=state.customer_data
-        )
-
-        # Check if query needs support agent too
-        if any(word in query_lower for word in ["help", "support", "issue", "ticket", "upgrade"]):
-            state.next_agent = "support_agent"
-        else:
-            # Just data query - can complete
-            state.next_agent = "router_final"
+        # Return updated state
+        new_state = state.copy()
+        new_state["messages"] = new_messages
+        new_state["context"] = new_context
+        new_state["last_agent"] = agent.name
         
-        return state
+        return new_state
+    
     return data_agent_node
+
+
+
+
     
 def create_support_agent_node(support_agent, mcp_client=None):
     """
