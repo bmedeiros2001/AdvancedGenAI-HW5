@@ -1,9 +1,4 @@
-# MCP integration
-# mcp
-
-
-# Database
-# sqlite3 (built-in with Python)
-
 # Utilities
 python-dateutil>=2.8.2
+
+openai>=1.0.0

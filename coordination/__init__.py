@@ -3,7 +3,7 @@ Coordination Package
 LangGraph-style multi-agent coordination system.
 """
 
-from coordination.graph_coordinator import GraphCoordinator, AgentState
-from coordination.multi_agent_coordinator import MultiAgentCoordinator
+from coordination.a2a_coordinator import A2ACoordinator
+from coordination.message_bus import MessageBus
 
-__all__ = ['GraphCoordinator', 'AgentState', 'MultiAgentCoordinator']
+__all__ = ['A2ACoordinator', 'MessageBus']

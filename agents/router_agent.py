@@ -1,15 +1,13 @@
-"""
-Router Agent - The Orchestrator
-This agent receives queries and coordinates specialist agents.
-
-analyze_intent: Uses keyword matching to figure out what the user wants
-route_to_specialist: Sends queries to the right specialist agent
-process: Main entry point that orchestrates everything
-"""
-
 from typing import Dict, Any, Optional, List
 from agents import BaseAgent
 from config.agent_config import ROUTER_AGENT_CONFIG
+from openai import OpenAI
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
 class RouterAgent(BaseAgent):
     """
@@ -17,89 +15,149 @@ class RouterAgent(BaseAgent):
     It's the entry point for all customer queries.
     """
     
-    def __init__(self):
-        """Initialize Router Agent with its configuration."""
-        super().__init__(ROUTER_AGENT_CONFIG)
+    def __init__(self, message_bus=None):
+        """Initialize Router Agent with message bus"""
+        super().__init__(ROUTER_AGENT_CONFIG, message_bus)
         
-        # We'll store references to specialist agents here
-        self.specialist_agents: Dict[str, BaseAgent] = {}
+        # Register with message bus
+        if self.message_bus:
+            self.message_bus.register_agent(self.name)
         
-    def register_specialist(self, agent: BaseAgent):
+        # Store references to specialist agents
+        self.specialist_agents: Dict[str, str] = {}  # Now stores agent names, not objects
+        
+
+    def route_to_specialist(self, agent_name: str, query: str, context: Optional[Dict] = None) -> Dict[str, Any]:
         """
-        Register a specialist agent that Router can delegate to.
-        
-        Args:
-            agent: A specialist agent instance
+        Route a query to a specialist by SENDING A MESSAGE (true A2A).
+        No direct function calls - only message passing!
         """
-        self.specialist_agents[agent.name] = agent
-        self.log_interaction("specialist_registered", {
-            "specialist": agent.name,
-            "capabilities": agent.capabilities
+        
+        if agent_name not in self.specialist_agents:
+            return {
+                "success": False,
+                "error": f"Unknown specialist agent: {agent_name}"
+            }
+        
+        # Send message to specialist
+        self.send_message(
+            to_agent=agent_name,
+            content=f"Please process: {query}",
+            data={"query": query, "context": context or {}}
+        )
+        
+        self.log_interaction("sent_message_to_specialist", {
+            "specialist": agent_name,
+            "query": query
         })
+        
+        # Wait for response message
+        response_message = self.receive_message(timeout=5.0)
+        
+        if response_message:
+            self.log_interaction("received_from_specialist", {
+                "specialist": response_message.from_agent,
+                "response_preview": str(response_message.data)[:200]
+            })
+            
+            return response_message.data
+        else:
+            return {
+                "success": False,
+                "error": "No response from specialist"
+            }
+    
     
     def analyze_intent(self, query: str) -> Dict[str, Any]:
         """
-        Analyze the user's query to determine intent and required agents.
-        
-        Args:
-            query: User's query string
-            
-        Returns:
-            Dictionary with intent analysis:
-            {
-                "primary_intent": str,
-                "requires_agents": List[str],
-                "keywords": List[str],
-                "complexity": str (simple/moderate/complex)
-            }
+        Use OpenAI GPT to analyze user's query intent.
         """
+        
+        prompt = f"""Analyze this customer service query and respond with JSON:
+
+    Query: "{query}"
+
+    Determine:
+    1. What agents are needed? (Customer Data Agent, Support Agent, or both)
+    2. What's the complexity? (simple, moderate, complex)
+    3. What's the primary intent?
+
+    Respond ONLY with valid JSON in this format:
+    {{
+        "primary_intent": "customer_data" | "customer_support" | "both",
+        "requires_agents": ["Customer Data Agent"] or ["Support Agent"] or ["Customer Data Agent", "Support Agent"],
+        "complexity": "simple" | "moderate" | "complex",
+        "reasoning": "brief explanation"
+    }}
+
+    Examples:
+    - "Get customer 5" → {{"primary_intent": "customer_data", "requires_agents": ["Customer Data Agent"], "complexity": "simple"}}
+    - "I need help, customer ID 5" → {{"primary_intent": "both", "requires_agents": ["Customer Data Agent", "Support Agent"], "complexity": "moderate"}}
+    """
+        
+        try:
+            # Call OpenAI GPT
+            response = client.chat.completions.create(
+                model="gpt-3.5-turbo",  # Cheap and fast
+                messages=[
+                    {"role": "system", "content": "You are a query analyzer. Respond only with valid JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0  # Deterministic
+            )
+            
+            # Parse JSON response
+            import json
+            
+            # Handle potential None for message content
+            message_content = response.choices[0].message.content
+            if message_content is None:
+                raise ValueError("Received None content from OpenAI API")
+
+            intent_analysis = json.loads(message_content.strip())
+            
+            # Add original query
+            intent_analysis["original_query"] = query
+            intent_analysis["llm_used"] = "gpt-3.5-turbo"
+            
+            self.log_interaction("gpt_intent_analyzed", intent_analysis)
+            return intent_analysis
+            
+        except Exception as e:
+            # Fallback to keyword matching if GPT fails
+            self.log_interaction("gpt_error", {"error": str(e), "using_fallback": True})
+            return self._fallback_keyword_analysis(query)
+
+    def _fallback_keyword_analysis(self, query: str) -> Dict[str, Any]:
+        """Fallback to your original keyword matching if Gemini fails"""
         query_lower = query.lower()
         
-        # Intent detection based on keywords
         intents = []
         required_agents = []
         keywords = []
         
-        # Check for customer data intent
+        # Your original keyword logic here...
         data_keywords = ["customer", "account", "information", "details", "id", "email", "phone"]
         if any(keyword in query_lower for keyword in data_keywords):
             intents.append("customer_data")
             required_agents.append("Customer Data Agent")
-            keywords.extend([k for k in data_keywords if k in query_lower])
         
-        # Check for support intent
         support_keywords = ["help", "issue", "problem", "support", "ticket", "cancel", "refund"]
         if any(keyword in query_lower for keyword in support_keywords):
             intents.append("customer_support")
             required_agents.append("Support Agent")
-            keywords.extend([k for k in support_keywords if k in query_lower])
         
-        # Check for update/modification intent
-        update_keywords = ["update", "change", "modify", "upgrade"]
-        if any(keyword in query_lower for keyword in update_keywords):
-            if "customer_data" not in intents:
-                intents.append("customer_data")
-                required_agents.append("Customer Data Agent")
-            keywords.extend([k for k in update_keywords if k in query_lower])
-        
-        # Determine complexity
         complexity = "simple"
         if len(required_agents) > 1:
             complexity = "complex"
-        elif any(word in query_lower for word in ["all", "list", "every", "multiple"]):
-            complexity = "moderate"
         
-        intent_analysis = {
+        return {
             "primary_intent": intents[0] if intents else "unknown",
-            "all_intents": intents,
-            "requires_agents": list(set(required_agents)),  # Remove duplicates
-            "keywords": list(set(keywords)),
+            "requires_agents": list(set(required_agents)),
             "complexity": complexity,
-            "original_query": query
+            "original_query": query,
+            "method": "fallback_keywords"
         }
-        
-        self.log_interaction("intent_analyzed", intent_analysis)
-        return intent_analysis
     
     def can_handle(self, query: str) -> bool:
         """
@@ -112,42 +170,6 @@ class RouterAgent(BaseAgent):
             Always True for Router
         """
         return True
-    
-    def route_to_specialist(self, agent_name: str, query: str, context: Optional[Dict] = None) -> Dict[str, Any]:
-        """
-        Route a query to a specific specialist agent.
-        
-        Args:
-            agent_name: Name of the specialist agent
-            query: Query to send to specialist
-            context: Optional context information
-            
-        Returns:
-            Response from specialist agent
-        """
-        if agent_name not in self.specialist_agents:
-            return {
-                "success": False,
-                "error": f"Unknown specialist agent: {agent_name}"
-            }
-        
-        specialist = self.specialist_agents[agent_name]
-        
-        self.log_interaction("routing_to_specialist", {
-            "specialist": agent_name,
-            "query": query,
-            "context_provided": context is not None
-        })
-        
-        # Call the specialist's process method
-        response = specialist.process(query, context)
-        
-        self.log_interaction("received_from_specialist", {
-            "specialist": agent_name,
-            "response_preview": str(response)[:200]
-        })
-        
-        return response
     
     def process(self, query: str, context: Optional[Dict] = None) -> Dict[str, Any]:
         """
@@ -170,19 +192,132 @@ class RouterAgent(BaseAgent):
         
         if not required_agents:
             # No clear intent - return clarification request
-            return self.format_message(
-                "I'm not sure I understand your request. Could you please provide more details?"
-            )
+            return {
+                "success": False,
+                "content": "I'm not sure I understand your request. Could you please provide more details?"
+            }
         
-        # Step 3: Route to appropriate agent(s)
-        if len(required_agents) == 1:
-            # Simple case: single agent
-            response = self.route_to_specialist(required_agents[0], query, context)
-            return self.format_message(response.get("content", str(response)))
+        # Step 3: Route based on intent
+        primary_intent = intent_analysis.get("primary_intent")
+        complexity = intent_analysis.get("complexity")
         
-        else:
-            # Complex case: multiple agents needed (we'll expand this in Part 3)
-            return self.format_message(
-                f"This query requires coordination between: {', '.join(required_agents)}. "
-                "(Multi-agent coordination will be implemented in Part 3)"
-            )
+        # SCENARIO 1: TASK ALLOCATION (Simple or Moderate)
+        # "Get customer info" OR "Help with account" (might need data first)
+        if complexity == "simple" or (primary_intent == "customer_support" and complexity == "moderate"):
+            return self._handle_task_allocation(query, intent_analysis)
+            
+        # SCENARIO 2: NEGOTIATION (Complex - Multiple Intents)
+        # "Cancel subscription + billing issues"
+        elif complexity == "complex" and len(required_agents) > 1:
+            return self._handle_negotiation(query, intent_analysis)
+            
+        # SCENARIO 3: MULTI-STEP (Complex - Batch/Aggregated)
+        # "Status of ALL high-priority tickets..."
+        elif "all" in query.lower() or "list" in query.lower():
+             return self._handle_multi_step(query, intent_analysis)
+             
+        # Default fallback
+        return self._handle_task_allocation(query, intent_analysis)
+
+    def _handle_task_allocation(self, query: str, intent: Dict) -> Dict[str, Any]:
+        """
+        Handle simple task allocation.
+        If support is needed, check if we need customer data first.
+        """
+        required_agents = intent.get("requires_agents", [])
+        
+        # If it's just data, route to data agent
+        if "Customer Data Agent" in required_agents and "Support Agent" not in required_agents:
+            return self.route_to_specialist("Customer Data Agent", query)
+            
+        # If it's support, we might need customer data first
+        if "Support Agent" in required_agents:
+            # Check if query implies we need to know WHO the customer is
+            # (Simple heuristic: if it mentions "my account" or "customer ID", fetch data first)
+            needs_data = "id" in query.lower() or "customer" in query.lower()
+            
+            context = {}
+            if needs_data:
+                # Step 1: Get Data
+                self.log_interaction("coordination_step", "Fetching customer data for support context")
+                data_response = self.route_to_specialist("Customer Data Agent", query)
+                
+                if data_response.get("success"):
+                    context["customer"] = data_response.get("customer")
+                    context["customer_id"] = data_response.get("customer", {}).get("id")
+            
+            # Step 2: Route to Support with context
+            return self.route_to_specialist("Support Agent", query, context)
+            
+        return {"success": False, "error": "Could not determine allocation"}
+
+    def _handle_negotiation(self, query: str, intent: Dict) -> Dict[str, Any]:
+        """
+        Handle negotiation between agents.
+        Router mediates: Support -> asks for info -> Router -> Data -> Router -> Support
+        """
+        self.log_interaction("coordination_start", "Starting Negotiation Flow")
+        
+        # Step 1: Ask Support Agent if they can handle it
+        support_response = self.route_to_specialist("Support Agent", query)
+        
+        # Step 2: Check if Support Agent requested more info (Negotiation)
+        if support_response.get("needs_context"):
+            missing_info = support_response.get("missing_info") # e.g., "billing_history"
+            self.log_interaction("negotiation_step", f"Support requested: {missing_info}")
+            
+            # Step 3: Ask Data Agent for the missing info
+            # We construct a specific query for the data agent
+            data_query = f"Get {missing_info} for customer {support_response.get('customer_id')}"
+            data_response = self.route_to_specialist("Customer Data Agent", data_query)
+            
+            # Step 4: Provide info back to Support Agent
+            context = {
+                "negotiated_data": data_response, 
+                "customer_id": support_response.get("customer_id")
+            }
+            final_response = self.route_to_specialist("Support Agent", query, context)
+            return final_response
+            
+        return support_response
+
+    def _handle_multi_step(self, query: str, intent: Dict) -> Dict[str, Any]:
+        """
+        Handle multi-step coordination (e.g., List -> Process Each).
+        """
+        self.log_interaction("coordination_start", "Starting Multi-Step Flow")
+        
+        # Step 1: Decompose - Get the list of customers first
+        # (Assuming query is like "Status of tickets for all active customers")
+        list_query = "List all active customers" # Simplified decomposition
+        
+        data_response = self.route_to_specialist("Customer Data Agent", list_query)
+        
+        if not data_response.get("success"):
+            return data_response
+            
+        customers = data_response.get("customers", [])
+        results = []
+        
+        # Step 2: Iterate and process for each customer
+        # (Limit to 3 for demo purposes to avoid timeout)
+        for customer in customers[:3]:
+            cid = customer['id']
+            cname = customer['name']
+            
+            # Step 3: Ask Support Agent for tickets for this customer
+            ticket_query = f"Get ticket status for customer {cid}"
+            support_response = self.route_to_specialist("Support Agent", ticket_query)
+            
+            results.append({
+                "customer": cname,
+                "status": support_response.get("content")
+            })
+            
+        # Step 4: Synthesize final answer
+        summary = "\n".join([f"- {r['customer']}: {r['status']}" for r in results])
+        return {
+            "success": True,
+            "content": f"Here is the status report:\n{summary}",
+            "details": results
+        }

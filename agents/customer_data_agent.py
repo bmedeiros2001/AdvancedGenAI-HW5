@@ -14,11 +14,15 @@ class CustomerDataAgent(BaseAgent):
     In Part 2, this will connect to MCP server.
     """
     
-    def __init__(self):
-        """Initialize Customer Data Agent."""
-        super().__init__(CUSTOMER_DATA_AGENT_CONFIG)
+    def __init__(self, message_bus=None):
+        """Initialize Customer Data Agent with message bus"""
+        super().__init__(CUSTOMER_DATA_AGENT_CONFIG, message_bus)
         
-        # Placeholder for MCP client (will implement in Part 2)
+        # Register with message bus
+        if self.message_bus:
+            self.message_bus.register_agent(self.name)
+        
+        # MCP client
         self.mcp_client = None
     
     def can_handle(self, query: str) -> bool:
@@ -34,6 +38,26 @@ class CustomerDataAgent(BaseAgent):
         data_keywords = ["customer", "account", "information", "details", "id", 
                         "email", "phone", "update", "get", "list"]
         return any(keyword in query.lower() for keyword in data_keywords)
+    
+    def process_message(self, message):
+        """
+        Process incoming message from another agent.
+        This is the TRUE A2A entry point!
+        """
+        query = message.data.get("query")
+        context = message.data.get("context", {})
+        
+        # Process the query
+        result = self.process(query, context)
+        
+        # Send response back to sender
+        self.send_message(
+            to_agent=message.from_agent,
+            content="Query processed",
+            data=result
+        )
+        
+        return result
     
     def extract_customer_id(self, query: str) -> Optional[str]:
         """

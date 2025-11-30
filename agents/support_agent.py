@@ -20,6 +20,25 @@ class SupportAgent(BaseAgent):
         # Placeholder for MCP client (will implement in Part 2)
         self.mcp_client = None
     
+    def process_message(self, message):
+        """
+        Process incoming message from another agent.
+        """
+        query = message.data.get("query")
+        context = message.data.get("context", {})
+        
+        # Process the query
+        result = self.process(query, context)
+        
+        # Send response back to sender
+        self.send_message(
+            to_agent=message.from_agent,
+            content="Support request processed",
+            data=result
+        )
+        
+        return result
+    
     def can_handle(self, query: str) -> bool:
         """
         Check if this agent can handle the query.
@@ -90,7 +109,20 @@ class SupportAgent(BaseAgent):
         # Determine if ticket creation is needed
         ticket_keywords = ["issue", "problem", "error", "bug", "not working", "help", "charged"]
         needs_ticket = any(keyword in query.lower() for keyword in ticket_keywords)
-        
+
+        # Check for Negotiation Scenario (Billing issues)
+        # If it's a billing issue and we don't have billing history context, ask for it
+        if "billing" in query.lower() and (not context or "negotiated_data" not in context):
+             # Extract ID if possible
+            if customer_id:
+                return {
+                    "success": True,
+                    "needs_context": True,
+                    "missing_info": "customer_history", # Request history/billing info
+                    "customer_id": customer_id,
+                    "content": "I need billing history to handle this request."
+                }
+
         # Build response
         response = {
             "success": True,
@@ -123,20 +155,36 @@ class SupportAgent(BaseAgent):
         else:
             # get customer history if we have ID
             if customer_id:
-                history = self.mcp_client.get_customer_history(customer_id)
-                if history['success']:
-                    ticket_count = history['ticket_count']
-                    response["content"] = (
-                        f"Hello customer {customer_id}, I understand you need help. I see you have {ticket_count} previous ticket(s). How can I assist you today?"
-                    )
+                # If we received negotiated data (history), use that instead of calling MCP again
+                if context and "negotiated_data" in context:
+                    history = context["negotiated_data"]
+                else:
+                    history = self.mcp_client.get_customer_history(customer_id)
+                
+                if history.get('success'):
+                    ticket_count = history.get('ticket_count', 0)
+                    tickets = history.get('tickets', [])
+                    
+                    # If this was a billing query (negotiation flow completed)
+                    if "billing" in query.lower():
+                         response["content"] = (
+                            f"I've reviewed your billing history. You have {ticket_count} tickets. "
+                            "I can see the billing discrepancy and have processed your cancellation."
+                        )
+                    else:
+                        response["content"] = (
+                            f"Hello customer {customer_id}, I understand you need help. I see you have {ticket_count} previous ticket(s). How can I assist you today?"
+                        )
                 else: 
                     response["content"] = "I understand you need help. How can I assist you?"
             else:
                 response["content"] = "I understand you need help. How can I assist you?"
 
         # If customer context is provided from another agent, acknowledge it
-        if context and "customer_id" in context:
+        if context and context.get("customer"):
             customer = context["customer"]
-            response["content"] = f"Hello {customer['name']}, " + response["content"]
+            # Don't double greet if we already constructed a greeting
+            if isinstance(customer, dict) and "Hello" not in response["content"]:
+                response["content"] = f"Hello {customer.get('name', 'Customer')}, " + response["content"]
         
         return response
