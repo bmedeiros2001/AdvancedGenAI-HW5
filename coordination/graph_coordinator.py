@@ -79,7 +79,7 @@ class GraphCoordinator:
     This is like the "stage manager" that decides which agent performs next.
     """
 
-    def __init__(self):
+    def __init__(self, verbose=True):
         """ initialize the coordinator """
 
         # store agent node functions
@@ -90,6 +90,9 @@ class GraphCoordinator:
 
         # execution log
         self.execution_log: List[Dict] = []
+        
+        # verbose flag
+        self.verbose = verbose
 
     def add_node(self, name: str, func: Callable):
         """ 
@@ -100,7 +103,8 @@ class GraphCoordinator:
             func: Function that processes state and returns updates
         """
         self.nodes[name] = func
-        print(f"     Registered node: {name}")
+        if self.verbose:
+            print(f"     Registered node: {name}")
 
     def add_conditional_edges(self, from_node: str, routing_func: Callable):
         """ 
@@ -111,7 +115,8 @@ class GraphCoordinator:
             routing_func: Function that takes state and returns next node name
         """
         self.routing_functions[from_node] = routing_func
-        print(f"     Registered conditional edges from: {from_node}")
+        if self.verbose:
+            print(f"     Registered conditional edges from: {from_node}")
 
 
     def route_next(self, state: AgentState) -> Optional[str]:
@@ -149,9 +154,10 @@ class GraphCoordinator:
             }
         }
         self.execution_log.append(log_entry)
-        print(f"\n[ROUTING] {from_agent} → {to_agent or 'END'} (iteration {state.iteration_count})")
+        if self.verbose:
+            print(f"\n[ROUTING] {from_agent} → {to_agent or 'END'} (iteration {state.iteration_count})")
     
-    def execute(self, initial_state: AgentState) -> AgentState:
+    def execute(self, initial_state: AgentState, verbose: Optional[bool] = None) -> AgentState:
         """
         Execute the agent graph starting from initial state.
         
@@ -162,17 +168,23 @@ class GraphCoordinator:
         
         Args:
             initial_state: Starting state with query
+            verbose: Override verbose setting for this execution
             
         Returns:
             Final state with response
         """
+        # Use instance verbose if not specified
+        if verbose is None:
+            verbose = self.verbose
+            
         state = initial_state
         
-        print("\n" + "="*60)
-        print("STARTING GRAPH EXECUTION")
-        print("="*60)
-        print(f"Query: {state.query}")
-        print(f"Starting agent: {state.current_agent}\n")
+        if verbose:
+            print("\n" + "="*60)
+            print("STARTING GRAPH EXECUTION")
+            print("="*60)
+            print(f"Query: {state.query}")
+            print(f"Starting agent: {state.current_agent}\n")
         
         while state.status == "in_progress" and state.iteration_count < state.max_iterations:
             state.increment_iteration()
@@ -180,14 +192,16 @@ class GraphCoordinator:
             # Get current agent's node function
             current_agent_name = state.current_agent
             if current_agent_name not in self.nodes:
-                print(f"[ERROR] Unknown agent '{current_agent_name}'")
+                if verbose:
+                    print(f"[ERROR] Unknown agent '{current_agent_name}'")
                 state.status = "error"
                 break
             
             node_func = self.nodes[current_agent_name]
             
             # Execute the agent
-            print(f"\n[>] Executing: {current_agent_name.upper()}")
+            if verbose:
+                print(f"\n[>] Executing: {current_agent_name.upper()}")
             state = node_func(state)
             
             # Check if we're done
@@ -205,12 +219,13 @@ class GraphCoordinator:
             # Update current agent for next iteration
             state.current_agent = next_agent
         
-        print("\n" + "="*60)
-        print("GRAPH EXECUTION COMPLETE")
-        print("="*60)
-        print(f"Total iterations: {state.iteration_count}")
-        print(f"Total messages: {len(state.messages)}")
-        print(f"Status: {state.status}")
+        if verbose:
+            print("\n" + "="*60)
+            print("GRAPH EXECUTION COMPLETE")
+            print("="*60)
+            print(f"Total iterations: {state.iteration_count}")
+            print(f"Total messages: {len(state.messages)}")
+            print(f"Status: {state.status}")
         
         return state
     

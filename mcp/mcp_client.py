@@ -5,7 +5,7 @@ class MCPClient:
     def __init__(self):
         """ initialize connection to MCP server """
         self.server = MCPServer()
-        print(f"[MCP Client] Connected to MCP server")
+        print(f"       [MCP Client] Connected to MCP server")
     
     def get_customer(self, customer_id: int) -> Dict[str, Any]:
         """ Get customer by ID """

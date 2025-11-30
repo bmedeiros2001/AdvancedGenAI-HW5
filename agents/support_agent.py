@@ -65,13 +65,6 @@ class SupportAgent(BaseAgent):
     def process(self, query: str, context: Optional[Dict] = None) -> Dict[str, Any]:
         """
         Process support requests.
-        
-        Args:
-            query: Support query
-            context: Optional context (like customer data from Data Agent)
-            
-        Returns:
-            Support response with recommendations
         """
         self.log_interaction("processing_support_query", {"query": query})
 

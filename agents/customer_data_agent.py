@@ -94,11 +94,17 @@ class CustomerDataAgent(BaseAgent):
                 if result['success']:
                     customer = result['customer']
                     return {
-                    "success": True,
-                    "operation": "retrieve",
-                    "customer": customer,
-                    "content": f"Customer {customer['id']}: {customer['name']} ({customer['status']})"
-                }
+                        "success": True,
+                        "operation": "retrieve",
+                        "customer": customer,
+                        "content": f"Customer {customer['id']}: {customer['name']} ({customer['status']})"
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "operation": "retrieve",
+                        "content": f"Failed to retrieve customer: {result.get('error', 'Unknown error')}"
+                    }
                 
             else:
                 return {
@@ -130,7 +136,8 @@ class CustomerDataAgent(BaseAgent):
             else:
                 return {
                     "success": False,
-                    "content": "Could not determine operation type"
+                    "operation": "list",
+                    "content": f"Failed to list customers: {result.get('error', 'Unknown error')}"
                 }
             
         # UPDATE operation

@@ -43,8 +43,11 @@ class BaseAgent:
         }
         self.interaction_history.append(log_entry)
         
-        # Print for visibility during development
-        print(f"[{self.name}] {interaction_type}: {json.dumps(data, indent=2)}")
+        # Print for visibility during development with indentation
+        json_str = json.dumps(data, indent=2)
+        # Indent each line by 4 spaces
+        indented_json = '\n'.join('    ' + line for line in json_str.split('\n'))
+        print(f"    [{self.name}] {interaction_type}:\n{indented_json}")
     
     def format_message(self, content: str, recipient: Optional[str] = None) -> Dict[str, Any]:
         """

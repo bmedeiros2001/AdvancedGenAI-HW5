@@ -29,7 +29,7 @@ class MultiAgentCoordinator:
     result = coordinator.process_query("Get customer info for ID 5")
     """
     
-    def __init__(self, router_agent, data_agent, support_agent, mcp_client=None):
+    def __init__(self, router_agent, data_agent, support_agent, mcp_client=None, verbose=True):
         """
         Initialize the multi-agent coordinator.
         
@@ -38,21 +38,24 @@ class MultiAgentCoordinator:
             data_agent: Customer data agent instance
             support_agent: Support agent instance
             mcp_client: Optional MCP client for tool calls
+            verbose: Whether to print detailed logs
         """
         self.router_agent = router_agent
         self.data_agent = data_agent
         self.support_agent = support_agent
         self.mcp_client = mcp_client
+        self.verbose = verbose
         
         # Create the graph coordinator
-        self.graph = GraphCoordinator()
+        self.graph = GraphCoordinator(verbose=verbose)
         
         # Set up the graph
         self._setup_graph()
         
-        print("\n[+] Multi-Agent Coordinator initialized")
-        print(f"   Agents: Router, Data Agent, Support Agent")
-        print(f"   MCP: {'Connected' if mcp_client else 'Not connected (using placeholders)'}\n")
+        if verbose:
+            print("\n[+] Multi-Agent Coordinator initialized")
+            print(f"   Agents: Router, Data Agent, Support Agent")
+            print(f"   MCP: Agents initialize their own connections\n")
     
     def _setup_graph(self):
         """
@@ -75,13 +78,14 @@ class MultiAgentCoordinator:
         END
         
         """
-        print("[*] Setting up agent graph...")
+        if self.verbose:
+            print("[*] Setting up agent graph...")
         
         # Create node functions (these wrap our agents)
-        router_node = create_router_node(self.router_agent)
-        data_node = create_data_agent_node(self.data_agent, self.mcp_client)
-        support_node = create_support_agent_node(self.support_agent, self.mcp_client)
-        final_node = create_router_final_node(self.router_agent)
+        router_node = create_router_node(self.router_agent, verbose=self.verbose)
+        data_node = create_data_agent_node(self.data_agent, self.mcp_client, verbose=self.verbose)
+        support_node = create_support_agent_node(self.support_agent, self.mcp_client, verbose=self.verbose)
+        final_node = create_router_final_node(self.router_agent, verbose=self.verbose)
         
         # Register nodes with graph
         self.graph.add_node("router", router_node)
@@ -93,9 +97,10 @@ class MultiAgentCoordinator:
         for agent_name, routing_func in ROUTING_MAP.items():
             self.graph.add_conditional_edges(agent_name, routing_func)
         
-        print("[+] Graph setup complete\n")
+        if self.verbose:
+            print("[+] Graph setup complete\n")
     
-    def process_query(self, query: str, verbose: bool = True) -> Dict[str, Any]:
+    def process_query(self, query: str, verbose: Optional[bool] = None) -> Dict[str, Any]:
         """
         Process a user query through the multi-agent system.
         
@@ -103,7 +108,7 @@ class MultiAgentCoordinator:
         
         Args:
             query: User's query string
-            verbose: Whether to print execution summary
+            verbose: Whether to print execution summary (defaults to self.verbose)
             
         Returns:
             Dictionary with:
@@ -113,6 +118,10 @@ class MultiAgentCoordinator:
             - customer_data: Any customer data retrieved
             - status: completed/error
         """
+        # Use instance verbose if not specified
+        if verbose is None:
+            verbose = self.verbose
+            
         # Create initial state
         initial_state = AgentState(
             query=query,
@@ -121,7 +130,7 @@ class MultiAgentCoordinator:
         )
         
         # Execute the graph
-        final_state = self.graph.execute(initial_state)
+        final_state = self.graph.execute(initial_state, verbose=verbose)
         
         # Print summary if verbose
         if verbose:

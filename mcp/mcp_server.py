@@ -16,7 +16,7 @@ class MCPServer:
     """ initialize MCP server """
     def __init__(self, db_file: str = DB_FILE):
         self.db_file = db_file
-        self.connection = None
+        self.connection: Optional[sqlite3.Connection] = None
         self._connect()
 
     def _connect(self):
@@ -27,13 +27,16 @@ class MCPServer:
 
             # makes rows behave like dictionaries (so, instead of `row[0]`, you can do `row['name']`)
             self.connection.row_factory = sqlite3.Row 
-            print(f"MCP Server connected to {self.db_file}")
+            print(f"       [MCP Server] Connected to {self.db_file}")
         except Exception as e:
-            print(f"Failed to connect to database: {e}")
+            print(f"       [MCP Server] Failed to connect to database: {e}")
             raise
     
     def _execute_query(self, query: str, params: tuple = ()) -> List[Dict]:
         """ Execute a SELECT query and return results as list of dictionaries. """
+        if not self.connection:
+            raise RuntimeError("Database connection not established")
+        
         try:
             cursor = self.connection.cursor()
             cursor.execute(query, params)
@@ -47,6 +50,9 @@ class MCPServer:
     
     def _execute_update(self, query: str, params:tuple = ()) -> int:
         """ Execute an INSERT/UPDATE/DELETE query. """
+        if not self.connection:
+            raise RuntimeError("Database connection not established")
+        
         try:
             cursor = self.connection.cursor()
             cursor.execute(query, params)
